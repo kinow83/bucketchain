@@ -7,24 +7,48 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <functional>
+#include <string.h>
+#include "sha256.h"
 
 namespace chkchk
 {
-    template<typename K, typename V>
+    template<typename K, typename V, uint32_t(*H)(V&)>
     class bucket_chain {
     public:
         class bucket {
-            uint32_t _signature = 0;
+            std::string _signature;
             std::map<K, V> _nodes;
+            SHA256 _hctx = SHA256();
 
         public:
+            bucket() {
+                _hctx.init();
+            }
             void push(K key, V value) {
                 _nodes[key] = value;
                 // FIXME: sha256
-                _signature += 1;
+                uint32_t h = H(value);
+                _hctx.update((unsigned char *)&h, sizeof(uint32_t));
+            }
+
+            void make_block() {
+                unsigned char digest[SHA256::DIGEST_SIZE];
+                char buf[2*SHA256::DIGEST_SIZE+1];
+                buf[2*SHA256::DIGEST_SIZE] = 0;
+
+                memset(digest,0,SHA256::DIGEST_SIZE);
+
+                _hctx.final(digest);
+                
+                for (int i = 0; i < SHA256::DIGEST_SIZE; i++) {
+                    sprintf(buf+i*2, "%02x", digest[i]);
+                }
+                _signature = std::string(buf);
+
             }
             
-            uint32_t signature() {
+            std::string signature() {
                 return _signature;
             }
 
@@ -34,7 +58,7 @@ namespace chkchk
                 return pack;
             }
 
-            std::string view() {
+            std::string to_string() {
                 std::string s;
                 for (auto &it : _nodes) {
                     s += std::to_string(it.first) + " " + std::to_string(it.second) + " -> ";
@@ -56,6 +80,7 @@ namespace chkchk
         }
 
         void make_block() {
+            _pending_bucket->make_block();
             _chains.push_back(_pending_bucket);
             _pending_bucket = std::make_shared<bucket>();
         }
@@ -66,9 +91,9 @@ namespace chkchk
             return pack;
         }
 
-        void view() {
+        void to_print() {
             for (auto &it : _chains) {
-                std::cout << "[" << it->signature() << "] " << it->view() << "\n";
+                std::cout << "[" << it->signature() << "] " << it->to_string() << "\n";
             }
         }
 
